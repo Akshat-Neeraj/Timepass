@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A Memory Box for You</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            height: 100vh; width: 100vw; overflow: hidden;
+            background: linear-gradient(135deg, #1d1129, #3c1a42);
+            font-family: 'Garamond', 'Georgia', serif;
+        }
+        #scene-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; cursor: pointer; }
+        .ui-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            flex-direction: column; text-align: center; color: white;
+            z-index: 10; pointer-events: none;
+        }
+        .step {
+            position: absolute; 
+            width: 90%; max-width: 500px;
+            background: rgba(0, 0, 0, 0.2); backdrop-filter: blur(10px);
+            border-radius: 20px; padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            visibility: hidden; opacity: 0;
+            pointer-events: all;
+        }
+        .step.active { visibility: visible; opacity: 1; }
+        h1 { font-size: clamp(1.8rem, 5vw, 2.5rem); text-shadow: 0 0 15px #ff9eee; line-height: 1.4; }
+        p { font-size: 1.1rem; color: rgba(255, 255, 255, 0.8); margin: 1.5rem 0; }
+        .btn {
+            padding: 0.8rem 2.5rem; font-size: 1.1rem; border-radius: 50px; border: none;
+            background-color: #ff477e; color: white; font-weight: bold;
+            cursor: pointer; box-shadow: 0 4px 20px rgba(255, 71, 126, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(255, 71, 126, 0.5); }
+        .btn.secondary { background-color: rgba(255,255,255,0.2); box-shadow: none; }
+        .button-container { display: flex; gap: 1rem; justify-content: center; }
+        .modal-input {
+            width: 100%; min-height: 80px; padding: 0.8rem; border-radius: 15px; border: 2px solid rgba(255,255,255,0.3);
+            background: rgba(0,0,0,0.2); color: white; font-family: inherit; font-size: 1rem; margin-top: 1rem; resize: vertical;
+        }
+        .ui-prompt {
+            position: absolute; top: 20%; width: 90%;
+            display: flex; flex-direction: column; align-items: center;
+            opacity: 0; pointer-events: all;
+        }
+        .ui-prompt p { font-size: 1.2rem; text-shadow: 0 0 10px white; }
+        .memory-text {
+            position: absolute; font-size: 1.5rem; text-shadow: 0 0 10px #ff9eee;
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="scene-container"></div>
+
+    <div class="ui-overlay">
+        <!-- Step 1: Password -->
+        <div class="step active" id="step-1">
+            <h1>A Memory Box</h1>
+            <p>I made this for you. But it's locked with a secret key... a memory only you and I share.</p>
+            <input type="password" class="modal-input" id="passwordInput" placeholder="Enter the secret word..." style="min-height: auto;">
+            <button class="btn" id="unlock-btn" style="margin-top: 1rem;">Unlock</button>
+        </div>
+
+        <!-- Interactive Story Part 1: Memories -->
+        <div class="ui-prompt" id="memory-ui">
+            <p id="memory-prompt">I've held onto a few memories... Click a star to see one.</p>
+            <span class="memory-text" id="mem1" style="top: 100px;">The way you laugh...</span>
+            <span class="memory-text" id="mem2" style="top: 150px;">...and how kind you are to everyone...</span>
+            <span class="memory-text" id="mem3" style="top: 200px;">...and how I just feel... happy when I'm with you.</span>
+        </div>
+
+        <!-- Step 2: Confession -->
+        <div class="step" id="step-2">
+            <!-- ===== THIS IS THE EXCHANGED TEXT ===== -->
+            <h1>I like you. A lot.</h1>
+            <div class="button-container">
+                <button class="btn" id="yes-btn">Yes</button>
+                <button class="btn secondary" id="no-btn">No</button>
+            </div>
+        </div>
+
+        <!-- Step 3: "Yes" Follow-up -->
+        <div class="step" id="step-3">
+            <h1>Really?! You have no idea how happy that makes me! If you don't mind me asking...</h1>
+            <textarea class="modal-input" id="yes-reason" placeholder="What made you say yes?"></textarea>
+            <button class="btn" id="submit-yes-reason">Send</button>
+        </div>
+
+        <!-- Step 4: "No" Follow-up -->
+        <div class="step" id="step-4">
+            <h1>Oh... I understand. If you're comfortable, could you tell me why? It would help me a lot.</h1>
+            <textarea class="modal-input" id="no-reason" placeholder="You can tell me here..."></textarea>
+            <button class="btn secondary" id="submit-no-reason">Send</button>
+        </div>
+
+        <!-- Step 5: Final Thank You Screen -->
+        <div class="step" id="step-5">
+            <h1 id="final-message"></h1>
+        </div>
+    </div>
+
+<script>
+    'use strict';
+    gsap.config({ nullTargetWarn: false });
+
+    // --- STEP 1: PERSONALIZE THIS ---
+    const SECRET_PASSWORD = "starlight"; // <-- CHANGE THIS
+    const WEBHOOK_URL = "https://webhook.site/87aa772c-de61-418f-8a57-c93c993e1ef6"; // <-- CHANGE THIS
+
+    function sendNotification(data) {
+        if (WEBHOOK_URL === "YOUR_UNIQUE_WEBHOOK_URL_HERE") return;
+        fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    }
+    sendNotification({ status: "Page Visited" });
+
+    let currentStep = 1;
+    function goToStep(step) {
+        const current = document.getElementById(`step-${currentStep}`);
+        const next = document.getElementById(`step-${step}`);
+        if(current) gsap.to(current, { duration: 0.5, opacity: 0, scale: 0.8, onComplete: () => current.classList.remove('active') });
+        if(next) {
+            next.classList.add('active');
+            gsap.fromTo(next, { opacity: 0, scale: 0.8 }, { duration: 0.8, delay: 0.5, opacity: 1, scale: 1, ease: 'elastic.out(1, 0.75)' });
+        }
+        currentStep = step;
+    }
+
+    // --- THREE.JS ADVANCED SCENE ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('scene-container').appendChild(renderer.domElement);
+    camera.position.z = 5;
+
+    const particlesGeometry = new THREE.BufferGeometry();
+    const particlesCnt = 5000;
+    const posArray = new Float32Array(particlesCnt * 3);
+    const initialPositions = new Float32Array(particlesCnt * 3);
+    for(let i=0; i < particlesCnt * 3; i++) { posArray[i] = (Math.random() - 0.5) * 20; }
+    particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    initialPositions.set(posArray);
+    const particlesMaterial = new THREE.PointsMaterial({ size: 0.015, color: 0xff9eee, transparent: true });
+    const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+    scene.add(particlesMesh);
+
+    const memoryOrbs = [];
+    const memoryPositions = [new THREE.Vector3(-2, 1, 0), new THREE.Vector3(2, 0, 0), new THREE.Vector3(0, -2, 0)];
+    const textureLoader = new THREE.TextureLoader();
+    const glowTexture = textureLoader.load('https://i.postimg.cc/y8YJ8r4v/glow.png');
+
+    for(let i=0; i<3; i++) {
+        const orbGeo = new THREE.SphereGeometry(0.08, 24, 24);
+        const orbMat = new THREE.MeshBasicMaterial({ color: 0xffcf40, transparent: true, opacity: 0 });
+        const orb = new THREE.Mesh(orbGeo, orbMat);
+        orb.position.copy(memoryPositions[i]);
+        orb.userData.id = i + 1; orb.userData.clicked = false;
+        
+        const glowSpriteMat = new THREE.SpriteMaterial({ map: glowTexture, color: 0xffcf40, transparent: true, opacity: 0, blending: THREE.AdditiveBlending });
+        const glowSprite = new THREE.Sprite(glowSpriteMat);
+        glowSprite.scale.set(0.8, 0.8, 0.8);
+        orb.add(glowSprite);
+        
+        scene.add(orb);
+        memoryOrbs.push(orb);
+    }
+    
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    window.addEventListener('mousemove', (e) => { mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1; });
+    
+    let revealedMemories = 0;
+    function onClick() {
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(memoryOrbs);
+        if (intersects.length > 0) {
+            const clickedOrb = intersects[0].object;
+            if (!clickedOrb.userData.clicked) {
+                clickedOrb.userData.clicked = true;
+                revealedMemories++;
+                sendNotification({ status: `Memory ${clickedOrb.userData.id} Revealed` });
+                gsap.to(clickedOrb.scale, { x: 2, y: 2, z: 2, duration: 0.3, yoyo: true, repeat: 1, ease: 'power2.out' });
+                gsap.to(document.getElementById(`mem${clickedOrb.userData.id}`), { opacity: 1, duration: 1, y: -20 });
+                if(revealedMemories === 3) {
+                    setTimeout(transitionToConstellation, 2000);
+                }
+            }
+        }
+    }
+    
+    function animate() {
+        requestAnimationFrame(animate);
+        particlesMesh.rotation.y += 0.0002;
+        memoryOrbs.forEach((orb, i) => {
+            orb.position.y += Math.sin(Date.now() * 0.001 + i) * 0.001;
+        });
+        renderer.render(scene, camera);
+    }
+    animate();
+    window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+
+    // --- STORY LOGIC ---
+    document.getElementById('unlock-btn').addEventListener('click', () => {
+        const passwordInput = document.getElementById('passwordInput');
+        if (passwordInput.value.trim().toLowerCase() === SECRET_PASSWORD) {
+            sendNotification({ status: "Password Correct" });
+            goToStep(null);
+            gsap.to('#memory-ui', { opacity: 1, duration: 1.5, delay: 1 });
+            memoryOrbs.forEach((orb, i) => {
+                gsap.to(orb.material, { opacity: 1, duration: 2, delay: 1 + i * 0.3 });
+                gsap.to(orb.children[0].material, { opacity: 0.7, duration: 2, delay: 1 + i * 0.3 });
+            });
+            window.addEventListener('click', onClick);
+        } else {
+            sendNotification({ status: "Password Incorrect" });
+            gsap.fromTo('#step-1', {x: 0}, {x: 10, duration: 0.1, repeat: 5, yoyo: true, clearProps: "x"});
+        }
+    });
+
+    function createTextPositions(text, size, yOffset) {
+        const textCanvas = document.createElement('canvas'); const textCtx = textCanvas.getContext('2d');
+        const canvasWidth = 1024; const canvasHeight = 128;
+        textCanvas.width = canvasWidth; textCanvas.height = canvasHeight;
+        textCtx.fillStyle = "white"; textCtx.font = `bold ${size}px Garamond`; textCtx.textAlign = "center";
+        textCtx.fillText(text, canvasWidth / 2, canvasHeight / 2 + size / 3);
+        const imageData = textCtx.getImageData(0, 0, canvasWidth, canvasHeight);
+        const positions = [];
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            if (imageData.data[i+3] > 128) {
+                const x = (i / 4) % canvasWidth; const y = Math.floor((i / 4) / canvasWidth);
+                positions.push({ x: (x / canvasWidth - 0.5) * 20, y: -(y / canvasHeight - 0.5) * 5 + yOffset, z: (Math.random() - 0.5) * 0.1 });
+            }
+        }
+        return positions;
+    }
+
+    // --- THIS IS THE PERFECTED TRANSITION ---
+    function transitionToConstellation() {
+        window.removeEventListener('click', onClick);
+        gsap.to('#memory-ui', { opacity: 0, duration: 1 });
+        gsap.to(memoryOrbs.map(orb => orb.material), { opacity: 0, duration: 1 });
+        gsap.to(memoryOrbs.map(orb => orb.children[0].material), { opacity: 0, duration: 1 });
+        
+        // THE CONSTELLATION WILL NOW SPELL "So... I guess..."
+        const introConfessionPoints = createTextPositions("So... I guess what I'm trying to say is...", 25, 0);
+
+        const animProps = { progress: 0 };
+        gsap.to(camera.position, { z: 18, duration: 7, ease: 'power2.inOut' });
+        gsap.to(animProps, {
+            progress: 1, duration: 5, ease: 'power2.inOut', delay: 1,
+            onUpdate: () => {
+                const positions = particlesMesh.geometry.attributes.position.array;
+                for(let i=0; i < particlesCnt; i++) {
+                    const ix = i * 3, iy = i * 3 + 1, iz = i * 3 + 2;
+                    const initialX = initialPositions[ix]; const initialY = initialPositions[iy]; const initialZ = initialPositions[iz];
+                    const targetPoint = introConfessionPoints[i % introConfessionPoints.length];
+                    const targetX = targetPoint ? targetPoint.x : initialX; const targetY = targetPoint ? targetPoint.y : initialY; const targetZ = targetPoint ? targetPoint.z : initialZ;
+                    positions[ix] = initialX + (targetX - initialX) * animProps.progress;
+                    positions[iy] = initialY + (targetY - initialY) * animProps.progress;
+                    positions[iz] = initialZ + (targetZ - initialZ) * animProps.progress;
+                }
+                particlesMesh.geometry.attributes.position.needsUpdate = true;
+            },
+            onComplete: () => {
+                setTimeout(() => goToStep(2), 2000); // Wait 2 seconds before showing the final prompt
+            }
+        });
+    }
+
+    document.getElementById('yes-btn').addEventListener('click', () => { sendNotification({ choice: "Yes" }); goToStep(3); });
+    document.getElementById('no-btn').addEventListener('click', () => { sendNotification({ choice: "No" }); goToStep(4); });
+
+    document.getElementById('submit-yes-reason').addEventListener('click', () => {
+        const input = document.getElementById('yes-reason');
+        if(input.value.trim().length === 0) {
+            gsap.fromTo(input, {x: 0}, {x: 10, duration: 0.1, repeat: 5, yoyo: true, clearProps: "x"});
+            input.placeholder = "Please write a little something... 😊";
+            return;
+        }
+        sendNotification({ choice: "Submitted 'Yes' Reason", reason: input.value.trim() });
+        document.getElementById('final-message').textContent = "Thank you for telling me that. It means the world to me. 😊";
+        goToStep(5);
+    });
+
+    document.getElementById('submit-no-reason').addEventListener('click', () => {
+        const input = document.getElementById('no-reason');
+        if(input.value.trim().length === 0) {
+            gsap.fromTo(input, {x: 0}, {x: 10, duration: 0.1, repeat: 5, yoyo: true, clearProps: "x"});
+            input.placeholder = "Please, just a word or two...";
+            return;
+        }
+        sendNotification({ choice: "Submitted 'No' Reason", reason: input.value.trim() });
+        document.getElementById('final-message').textContent = "Thank you for being honest. I appreciate it.";
+        goToStep(5);
+    });
+</script>
+</body>
+</html>
